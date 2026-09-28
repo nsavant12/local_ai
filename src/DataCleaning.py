@@ -2,6 +2,8 @@ import re
 
 import pandas as pd
 
+from pathlib import Path
+
 DATE_PATTERN = r'[A-Za-z]{3} \d{1,2}, \d{4}\s+\d{1,2}:\d{2}:\d{2}\s?[AP]M'
 
 
@@ -10,6 +12,7 @@ def read_imssg(file_path: str) -> pd.DataFrame:
     tapback_header = "Tapbacks:"
     reaction_pattern = r'^\s*(Loved|Liked|Disliked|Laughed at|Emphasized|Questioned) by .+$'
     reply_context_message = "This message responded to an earlier message."
+    attachment_missing = "Attachment missing!"
     system_event_pattern = rf'^\s*{DATE_PATTERN}.*\b(named the conversation|added .+ to the conversation\.|removed .+ from the conversation\.|left the conversation\.)'
     attachment_pattern = r'(/Attachments/|/StickerCache/|\.(heic|jpe?g|png|mov|mp4|pdf|caf|gif)\s*$)'
     email_pattern = r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}'
@@ -24,6 +27,7 @@ def read_imssg(file_path: str) -> pd.DataFrame:
     filtered_lines = []
     for line in lines:
         if (
+            attachment_missing not in line and
             tapback_header not in line and
             reply_context_message not in line and
             not re.search(reaction_pattern, line, re.IGNORECASE) and
@@ -59,3 +63,14 @@ def read_imssg(file_path: str) -> pd.DataFrame:
 
     df['timestamp'] = timestamps
     return df
+
+all_chats = {}
+data_directory = Path(__file__).resolve().parent.parent / "data" / "private" / "imessage"
+for file in data_directory.glob('*.txt'):
+    file_name = file.stem
+    df = read_imssg(file)
+    //Filter out spam and prompotional messages
+    if (df['sender'] == "Me").any():
+        all_chats[file_name] = df
+
+print(len(all_chats))
