@@ -10,6 +10,7 @@ DATE_PATTERN = r'[A-Za-z]{3} \d{1,2}, \d{4}\s+\d{1,2}:\d{2}:\d{2}\s?[AP]M'
 def read_imssg(file_path: str) -> pd.DataFrame:
     # Define filtering patterns
     tapback_header = "Tapbacks:"
+    game_pigeon = "GamePigeon message:"
     reaction_pattern = r'^\s*(Loved|Liked|Disliked|Laughed at|Emphasized|Questioned) by .+$'
     reply_context_message = "This message responded to an earlier message."
     attachment_missing = "Attachment missing!"
@@ -25,16 +26,24 @@ def read_imssg(file_path: str) -> pd.DataFrame:
 
     # Apply filters to remove unwanted lines
     filtered_lines = []
+    skipping_preview = False
     for line in lines:
+        if line == "\n":
+            skipping_preview = False
+        if skipping_preview:
+            continue
+        if re.search(url_pattern,line):
+            skipping_preview = True
+            continue
         if (
             attachment_missing not in line and
+            game_pigeon not in line and
             tapback_header not in line and
             reply_context_message not in line and
             not re.search(reaction_pattern, line, re.IGNORECASE) and
             not re.search(system_event_pattern, line) and
             not re.search(attachment_pattern, line, re.IGNORECASE) and
-            not re.search(email_pattern, line) and
-            not re.search(url_pattern, line)
+            not re.search(email_pattern, line)
         ):
             line = re.sub(read_receipt_pattern, "", line)
             line = re.sub(edited_pattern, "", line)
@@ -73,5 +82,7 @@ for file in data_directory.glob('*.txt'):
     #Filter out spam & promotional messages
     if (df['sender'] == "Me").any():
         all_chats[file_name] = df
-
-print(len(all_chats))
+combined_text = ""
+for file_name, df in all_chats.items():
+    combined_text += "\n".join(df['message']) + "\n"
+print(len(combined_text))
