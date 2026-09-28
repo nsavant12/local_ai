@@ -62,6 +62,7 @@ def read_imssg(file_path: str) -> pd.DataFrame:
         timestamps.append(timestamp)
 
     df['timestamp'] = timestamps
+    df = df[df['message'] != ""]
     return df
 
 all_chats = {}
@@ -69,7 +70,7 @@ data_directory = Path(__file__).resolve().parent.parent / "data" / "private" / "
 for file in data_directory.glob('*.txt'):
     file_name = file.stem
     df = read_imssg(file)
-    //Filter out spam and prompotional messages
+    #Filter out spam & promotional messages
     if (df['sender'] == "Me").any():
         all_chats[file_name] = df
 
