@@ -32,7 +32,7 @@ def read_imssg(file_path: str) -> pd.DataFrame:
             skipping_preview = False
         if skipping_preview:
             continue
-        if re.search(url_pattern,line):
+        if re.search(url_pattern,line) or game_pigeon in line:
             skipping_preview = True
             continue
         if (
@@ -85,4 +85,8 @@ for file in data_directory.glob('*.txt'):
 combined_text = ""
 for file_name, df in all_chats.items():
     combined_text += "\n".join(df['message']) + "\n"
-print(len(combined_text))
+combined_text.count("Let's play")
+combined_text.count("Your move.")
+with open(Path(__file__).resolve().parent.parent / "output" / "combined_text.txt", "w") as f:
+    f.write(combined_text)
+
