@@ -70,7 +70,8 @@ def estimate_loss(
                 y = y.to(device)
 
                 _, loss = model(x,y)
-                token_count = y.numel()
+                #cross-entropy avg over unmasked targets
+                token_count = (y != -100).sum().item()
                 total_loss += loss.item() * token_count
                 total_tokens += token_count
             if total_tokens == 0:

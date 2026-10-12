@@ -161,9 +161,13 @@ class GPT(nn.Module):
 
         loss = None
         if targets is not None:
+            #Catch bad batches where all targets are ignored
+            if not (targets != -100).any().item():
+                raise ValueError("This batch doesn't have any targets to learn from")
             loss = F.cross_entropy(
                 logits.reshape(-1, logits.shape[-1]),
                 targets.reshape(-1),
+                ignore_index=-100,
             )
         return logits, loss
 
@@ -212,9 +216,13 @@ if __name__ == "__main__":
         dropout=0.0,
     )
     model.eval()
-    tokens = torch.randint(0,32, (2,7))
+    #Context tokens: 10, 11, 12. Reply tokens: 20, 21, 22
+    tokens = torch.tensor([[10,11,12,20,21,22]])
+    is_reply = torch.tensor([[False, False, False, True, True, True]])
     x= tokens[:, :-1]
-    y = tokens[:, 1:]
+    y = tokens[:, 1:].clone()
+    y[~is_reply[:, 1:]] = -100
+
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     model.eval()
     with torch.no_grad():
