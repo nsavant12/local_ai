@@ -4,16 +4,17 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-block_size = 256
-n_embd = 384
-n_head = 6
-n_layer = 6
-dropout = .2
 
 #Step 1: Head, represents a single attention head in an attention mechanism
 class Head(nn.Module):
     
-    def __init__(self, head_size:int) -> None:
+    def __init__(
+        self, 
+        n_embd: int, 
+        head_size:int,
+        block_size: int,
+        dropout: float,
+    ) -> None:
         super().__init__()
         #
         self.key = nn.Linear(n_embd, head_size, bias=False)
@@ -39,10 +40,17 @@ class Head(nn.Module):
 class MultiHeadSelfAttention(nn.Module):
     # mutliple heads of self attention in parallel
 
-    def __init__(self, n_head: int, head_size: int) -> None:
+    def __init__(
+        self,
+        n_embd: int, 
+        n_head: int, 
+        head_size: int,
+        block_size: int,
+        dropout: float,
+    ) -> None:
         super().__init__()
         #create multiple attention heads, feeding into the module list so that we can run the heads in parallel
-        self.heads = = nn.ModuleList([Head(head_size) for _ in range(n_head)])
+        self.heads = nn.ModuleList([Head(n_embd=n_embd,head_size=head_size,block_size=block_size,dropout=dropout) for _ in range(n_head)])
         self.projection = nn.Linear(head_size * n_head, n_embd)
         self.dropout = nn.Dropout(dropout)
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -55,7 +63,7 @@ class MultiHeadSelfAttention(nn.Module):
 class FeedForward(nn.Module):
     # Linear Layer followed by a non-linear layer
 
-    def __init__(self, n_embd: int) -> None:
+    def __init__(self, n_embd: int, dropout: float) -> None:
         super().__init__()
         self.net = nn.Sequential(
             #first linear layer to expand the embedding dimension
@@ -70,11 +78,25 @@ class FeedForward(nn.Module):
 class Block(nn.Module):
     # Transformer block: multi-head self-attention + feed-forward network
     # n_embd: is our embedding dimension and n_head: is the number of heads that we want to use in the multi-head self-attention mechanism.
-    def __init__(self, n_embd:int, n_head: int) -> None:
+    def __init__(
+        self, 
+        n_embd:int,
+        n_head: int, 
+        block_size: int,
+        dropout: float,
+    ) -> None:
         super().__init__()
+        if n_head <= 0 or n_embd % n_head != 0:
+            raise ValueError(f"n_head must be pos. and divide n_embd evenly")
         head_size = n_embd // n_head
-        self.self_attention = MultiHeadSelfAttention(n_head, head_size)
-        self.feed_forward = FeedForward(n_embd)
+        self.self_attention = MultiHeadSelfAttention(
+            n_embd=n_embd,
+            n_head=n_head, 
+            head_size=head_size, 
+            block_size=block_size, 
+            dropout=dropout,
+        )
+        self.feed_forward = FeedForward(n_embd=n_embd, dropout=dropout)
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
 
@@ -84,13 +106,29 @@ class Block(nn.Module):
         return x
 
 class GPT(nn.Module):
-    def __init__(self, vocab_size:int) -> None:
+    def __init__(
+        self,
+        vocab_size: int,
+        block_size: int,
+        n_embd: int,
+        n_head: int,
+        n_layer: int,
+        dropout: float,
+    ) -> None:
         super().__init__()
+        self.block_size = block_size
         #each token directly reads off the logits for the next token from a lookup table
         self.token_embd_table = nn.Embedding(vocab_size, n_embd)
         self.position_embd_table = nn.Embedding(block_size,n_embd)
-        self.blocks = nn.Sequential(
-            *[Block(n_embd, n_head=n_head) for _ in range(n_layer)])
+        self.blocks = nn.Sequential(*[
+            Block(
+                n_embd=n_embd,
+                n_head=n_head,
+                block_size=block_size,
+                dropout=dropout,
+            )
+            for _ in range(n_layer)
+        ])
         self.final_ln = nn.LayerNorm(n_embd)
         self.final_ll = nn.Linear(n_embd, vocab_size)
 
@@ -133,7 +171,7 @@ class GPT(nn.Module):
     # Generate new tokens based on the current input sequence.
     def generate(self, input_tokens: torch.Tensor, max_new_tokens: int) -> torch.Tensor:
         for _ in range(max_new_tokens):
-            cropped_input = input_tokens[:, -block_size:]
+            cropped_input = input_tokens[:, -self.block_size:]
             logits, _ = self.forward(cropped_input)
             logits = logits[:, -1, :]
             probs = F.softmax(logits, dim=-1)
@@ -141,23 +179,13 @@ class GPT(nn.Module):
             input_tokens = torch.cat([input_tokens, next_token], dim=1)
         return input_tokens
 
-model = GPT()
-model = model.to(device)
-# num params: print(sum(p.numel() for p in model.parameters())/1e6, "M parameters")
-batch_size = 1
-seq_len = 6
-x = torch.radint(0, vocab_size, (batch_size, seq_len))
-x = x.to(device)
-logits, loss = model(x)
-print(logits.shape, loss)
-
 def print_model_summary(model: torch.nn.Module, indent: str = '') -> None:
     for name, child in model.named_children():
         params = sum(p.numel() for p in child.parameters())
         print(f"{indent}| {name}: {child.__class__.__name__} ({params:,} parameters)")
         print_model_summary(child, indent + '|  ')
 
-#print_model_summary(model)
+
 
 def get_model_stats(model: torch.nn.Module) -> pd.DataFrame:
     stats = []
@@ -172,16 +200,23 @@ def get_model_stats(model: torch.nn.Module) -> pd.DataFrame:
             })
     return pd.DataFrame(stats)
 
-stats_df = get_model_stats(model)
 
 if __name__ == "__main__":
     torch.manual_seed(42)
 
-    model = GPT(vocab_size=32)
+    model = GPT(
+        vocab_size=32,
+        block_size=8,
+        n_embd=16,
+        n_head=2,
+        n_layer=1,
+        dropout=0.0,
+    )
     model.eval()
     x = torch.randint(0,32, (2,6))
     with torch.no_grad():
         logits, loss = model(x)
     print(logits.shape, loss)
+    #print_model_summary(model), stats_df = get_model_stats(model)
 
 

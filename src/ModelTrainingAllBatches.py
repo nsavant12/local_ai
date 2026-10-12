@@ -44,11 +44,10 @@ model = GPT(
     n_embd=n_embd,
     n_head=n_head,
     n_layer=n_layer,
-    dropout=dropout
-    device = device
+    dropout=dropout,
 ).to(device)
 
-model = torch.compile(model)
+# model = torch.compile(model)
 
 class TextDataset(Dataset):
     def __init__(self,data: torch.Tensor, block_size: int) -> None:
