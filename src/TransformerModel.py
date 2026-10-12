@@ -1,28 +1,14 @@
-import sys
-import torch
-sys.path.append(str(Path(__file__).resolve().parent.parent))
-from minbpe import BasicTokenizer
-t = BasicTokenizer()
-t.load(file_prefix=str(Path(__file__).resolve().parent.parent / "output" / "tokenizer" / "my_tokenizer.model"))
 from typing import Optional, Tuple
+import pandas as pd
+import torch
 import torch.nn as nn
 from torch.nn import functional as F
-import pandas as pd
 
-def get_vocab_size(t : BasicTokenizer) -> int:
-    vocab = t.vocab
-    special_tokens = t.special_tokens
-    return len(vocab) + len(special_tokens)
-
-torch.manual_seed(3647)
-#hyperparameters for the transformer model
 block_size = 256
 n_embd = 384
 n_head = 6
 n_layer = 6
 dropout = .2
-vocab_size = get_vocab_size(t)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #Step 1: Head, represents a single attention head in an attention mechanism
 class Head(nn.Module):
@@ -56,12 +42,12 @@ class MultiHeadSelfAttention(nn.Module):
     def __init__(self, n_head: int, head_size: int) -> None:
         super().__init__()
         #create multiple attention heads, feeding into the module list so that we can run the heads in parallel
-        self.heads = = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
-        self.projection = nn.Linear(head_size * n_head. n_embd)
+        self.heads = = nn.ModuleList([Head(head_size) for _ in range(n_head)])
+        self.projection = nn.Linear(head_size * n_head, n_embd)
         self.dropout = nn.Dropout(dropout)
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         #loop over the heads and feed the input to each head independently and concatenate the outputs
-        out = torch.cat([head(x) for head in self.heads]m dim=1)
+        out = torch.cat([head(x) for head in self.heads], dim=-1)
         #apply dropout and project the concatenated output back to the original embedding dimension
         out = self.dropout(self.projection(out))
         return out
@@ -75,7 +61,7 @@ class FeedForward(nn.Module):
             #first linear layer to expand the embedding dimension
             nn.Linear(n_embd, 4 * n_embd),
             nn.ReLU(),
-            nn.Linear(4*n_embd, n_embd)
+            nn.Linear(4*n_embd, n_embd),
             nn.Dropout(dropout),
         )
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -98,11 +84,11 @@ class Block(nn.Module):
         return x
 
 class GPT(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, vocab_size:int) -> None:
         super().__init__()
         #each token directly reads off the logits for the next token from a lookup table
         self.token_embd_table = nn.Embedding(vocab_size, n_embd)
-        self.postion_embd_table = nn.Embedding(block_size,n_embd)
+        self.position_embd_table = nn.Embedding(block_size,n_embd)
         self.blocks = nn.Sequential(
             *[Block(n_embd, n_head=n_head) for _ in range(n_layer)])
         self.final_ln = nn.LayerNorm(n_embd)
@@ -117,7 +103,7 @@ class GPT(nn.Module):
                 torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0,std=0.02)
-    def forward(self, input_tokens: torch.Tensorm targets: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    def forward(self, input_tokens: torch.Tensor, targets: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Forward pass of GPT model.
         Args:
@@ -129,7 +115,7 @@ class GPT(nn.Module):
         """
         B, T = input_tokens.shape
         token_embd = self.token_embd_table(input_tokens)
-        positional_embd = self.position_emdb_table(torch.arange(T, device = device))
+        positional_embd = self.position_embd_table(torch.arange(T, device = input_tokens.device))
         x = token_embd + positional_embd
         x = self.blocks(x)
         x = self.final_ln(x)
@@ -175,9 +161,9 @@ def print_model_summary(model: torch.nn.Module, indent: str = '') -> None:
 
 def get_model_stats(model: torch.nn.Module) -> pd.DataFrame:
     stats = []
-    for name, child in model.named_modules():
+    for name, module in model.named_modules():
         if len(list(module.children())) == 0:
-            params = sum(p.numel() for p in child.parameters())
+            params = sum(p.numel() for p in module.parameters())
             stats.append({
                 'Layer name': name,
                 'Type': module.__class__.__name__,
@@ -187,5 +173,15 @@ def get_model_stats(model: torch.nn.Module) -> pd.DataFrame:
     return pd.DataFrame(stats)
 
 stats_df = get_model_stats(model)
+
+if __name__ == "__main__":
+    torch.manual_seed(42)
+
+    model = GPT(vocab_size=32)
+    model.eval()
+    x = torch.randint(0,32, (2,6))
+    with torch.no_grad():
+        logits, loss = model(x)
+    print(logits.shape, loss)
 
 
