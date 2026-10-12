@@ -159,13 +159,12 @@ class GPT(nn.Module):
         x = self.final_ln(x)
         logits = self.final_ll(x)
 
-        if targets is None:
-            loss = None
-        else:
-            B,T,C = logits.shape
-            logits = logits.view(B*T, C)
-            targets = targets.view(B*T)
-            loss = F.cross_entropy(logits, targets)
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(
+                logits.reshape(-1, logits.shape[-1]),
+                targets.reshape(-1),
+            )
         return logits, loss
 
     # Generate new tokens based on the current input sequence.
@@ -213,10 +212,29 @@ if __name__ == "__main__":
         dropout=0.0,
     )
     model.eval()
-    x = torch.randint(0,32, (2,6))
+    tokens = torch.randint(0,32, (2,7))
+    x= tokens[:, :-1]
+    y = tokens[:, 1:]
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    model.eval()
     with torch.no_grad():
-        logits, loss = model(x)
-    print(logits.shape, loss)
+        _, initial_loss = model(x, targets=y)
+    print(f"Initial loss: {initial_loss.item():.4f}")
+    model.train()
+    for step in range(50):
+        optimizer.zero_grad(set_to_none=True)
+        logits, loss = model(x, targets=y)
+        loss.backward()
+        optimizer.step()
+        if (step+1) % 10 == 0:
+            print(f"Step {step+1}: loss = {loss.item():.4f}")
+    model.eval()
+    with torch.no_grad():
+        logits, final_loss = model(x, targets=y)
+    
+    print(f"Logits shape: {logits.shape}")
+    print(f"Final loss: {final_loss.item():.4f}")
+
     #print_model_summary(model), stats_df = get_model_stats(model)
 
 
