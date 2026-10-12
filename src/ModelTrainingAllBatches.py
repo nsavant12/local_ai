@@ -2,6 +2,7 @@ from pathlib import Path
 import sys
 from typing import Tuple, Dict
 import matplotlib.pyplot as plt
+import hashlib
 import torch
 from torch.utils.data import DataLoader, Dataset
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -91,6 +92,33 @@ def save_checkpoint(
     }
     torch.save(checkpoint, file_path)
 
+#Cache existing token IDs
+def load_or_encode(
+    txt: str,
+    tokenizer: BasicTokenizer,
+    tokenizer_path: Path,
+    cache_dir: Path,
+) -> torch.Tensor:
+    # Identify exact txt and saved tokenizer
+    txt_hash = hashlib.sha256(txt.encode('utf-8')).hexdigest()
+    tokenizer_hash = hashlib.sha256(tokenizer_path.read_bytes()).hexdigest()
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"basic-v1-{txt_hash}-{tokenizer_hash}.pt"
+
+    #Load tensor to RAM
+    if cache_path.is_file():
+        print("Loading cached token ids", flush = True)
+        return torch.load(cache_path,map_location="cpu",weights_only=True)
+
+    print("No matching cache. Cont tokenization", flush=True)
+    data = torch.tensor(tokenizer.encode(txt), dtype=torch.long, device="cpu")
+
+    temp_path = cache_path.with_suffix(".tmp")
+    torch.save(data, temp_path)
+    temp_path.replace(cache_path)
+    print("Tokenization done, cache saved", flush=True)
+    return data
 
 def main() -> None:
     torch.manual_seed(42)
@@ -101,8 +129,11 @@ def main() -> None:
 
     with open(PROJECT_ROOT / "output" / "combined_text.txt", "r", encoding="utf-8") as f:
         text_seq = f.read()
-    encoded_text_seq = tokenizer.encode(text_seq)
-    data = torch.tensor(encoded_text_seq, dtype=torch.long)
+    data = load_or_encode(
+        txt=text_seq, 
+        tokenizer=tokenizer, 
+        tokenizer_path=tokenizer_path, 
+        cache_dir = PROJECT_ROOT / "output" / "token_cache")
     split_idx = int(0.9 * len(data))
     train_data = data[:split_idx]
     val_data = data[split_idx:]
