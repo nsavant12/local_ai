@@ -74,19 +74,24 @@ def read_imssg(file_path: str) -> pd.DataFrame:
     df = df[df['message'] != ""]
     return df
 
-all_chats = {}
-data_directory = Path(__file__).resolve().parent.parent / "data" / "private" / "imessage"
-for file in data_directory.glob('*.txt'):
-    file_name = file.stem
-    df = read_imssg(file)
-    #Filter out spam & promotional messages
-    if (df['sender'] == "Me").any():
-        all_chats[file_name] = df
-combined_text = ""
-for file_name, df in all_chats.items():
-    combined_text += "\n".join(df['message']) + "\n"
-combined_text.count("Let's play")
-combined_text.count("Your move.")
-with open(Path(__file__).resolve().parent.parent / "output" / "combined_text.txt", "w") as f:
-    f.write(combined_text)
 
+def main() -> None:
+    all_chats = {}
+    data_directory = Path(__file__).resolve().parent.parent / "data" / "private" / "imessage"
+    for file in data_directory.glob('*.txt'):
+        file_name = file.stem
+        df = read_imssg(file)
+        #Filter out spam & promotional messages
+        if (df['sender'] == "Me").any():
+            all_chats[file_name] = df
+    combined_text = ""
+    for file_name, df in all_chats.items():
+        combined_text += "\n".join(df['message']) + "\n"
+    combined_text.count("Let's play")
+    combined_text.count("Your move.")
+    with open(Path(__file__).resolve().parent.parent / "output" / "combined_text.txt", "w") as f:
+        f.write(combined_text)
+
+
+if __name__ == "__main__":
+    main()
