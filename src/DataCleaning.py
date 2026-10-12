@@ -1,8 +1,22 @@
+import json
 import re
 
 import pandas as pd
 
 from pathlib import Path
+
+if __package__:
+    from .ConversationStructure import (
+        build_reply_examples,
+        split_sessions,
+        split_train_val_sessions,
+    )
+else:
+    from ConversationStructure import (
+        build_reply_examples,
+        split_sessions,
+        split_train_val_sessions,
+    )
 
 DATE_PATTERN = r'[A-Za-z]{3} \d{1,2}, \d{4}\s+\d{1,2}:\d{2}:\d{2}\s?[AP]M'
 
@@ -74,6 +88,44 @@ def read_imssg(file_path: str) -> pd.DataFrame:
     df = df[df['message'] != ""]
     return df
 
+def prep_examples(
+    chats: dict[str, pd.DataFrame],
+    self_sender: str = "Me",
+    val_fraction: float = 0.1,
+    seed: int = 42
+) -> tuple[list[dict], list[dict]]:
+
+    sessions = []
+    for chat in sorted(chats):
+        df = chats[chat]
+        records = df.sort_values(
+            "timestamp", kind="stable"
+        ).to_dict("records")
+        sessions.extend(split_sessions(records))
+
+    good_sessions = [session for session in sessions if build_reply_examples(session, self_sender=self_sender)]
+    train_sessions, val_sessions = split_train_val_sessions(good_sessions, val_fraction, seed)
+
+    train_examples = []
+    for session in train_sessions:
+        train_examples.extend(
+            build_reply_examples(session, self_sender=self_sender)
+        )
+    
+    val_examples = []
+    for session in val_sessions:
+        val_examples.extend(
+            build_reply_examples(session, self_sender=self_sender)
+        )
+    return train_examples, val_examples
+
+def write_jsonl(examples: list[dict], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for example in examples:
+            f.write(json.dumps(example, ensure_ascii=False) + "\n")
+
+
 
 def main() -> None:
     all_chats = {}
@@ -84,13 +136,16 @@ def main() -> None:
         #Filter out spam & promotional messages
         if (df['sender'] == "Me").any():
             all_chats[file_name] = df
-    combined_text = ""
-    for file_name, df in all_chats.items():
-        combined_text += "\n".join(df['message']) + "\n"
-    combined_text.count("Let's play")
-    combined_text.count("Your move.")
-    with open(Path(__file__).resolve().parent.parent / "output" / "combined_text.txt", "w") as f:
-        f.write(combined_text)
+
+    train_examples, val_examples = prep_examples(all_chats)
+    output_dir = (
+        Path(__file__).resolve().parent.parent / "output" / "conversations"
+    )
+    write_jsonl(train_examples, output_dir / "train.jsonl")
+    write_jsonl(val_examples, output_dir / "validate.jsonl")
+
+    print(f"Training ex: {len(train_examples)}")
+    print(f"Validation ex: {len(val_examples)}")
 
 
 if __name__ == "__main__":
