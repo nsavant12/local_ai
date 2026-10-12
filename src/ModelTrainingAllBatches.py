@@ -36,10 +36,9 @@ def get_data_loaders(
     val_data: torch.Tensor,
     block_size: int,
     batch_size: int,
-    device: torch.device
 ) -> Tuple[DataLoader, DataLoader]:
-    train_dataset = TextDataset(train_data.to(device), block_size)
-    val_dataset = TextDataset(val_data.to(device), block_size)
+    train_dataset = TextDataset(train_data.cpu(), block_size)
+    val_dataset = TextDataset(val_data.cpu(), block_size)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
@@ -55,6 +54,7 @@ def estimate_loss(
 ) -> Dict[str,float]:
     if eval_iters <= 0:
         raise ValueError("eval_iters needs to be a pos int.")
+    device = next(model.parameters()).device
     was_training = model.training
 
     model.eval()
@@ -66,6 +66,9 @@ def estimate_loss(
             for i, (x,y) in enumerate(loader):
                 if i >= eval_iters:
                     break
+                x = x.to(device)
+                y = y.to(device)
+
                 _, loss = model(x,y)
                 token_count = y.numel()
                 total_loss += loss.item() * token_count
@@ -143,7 +146,7 @@ def main() -> None:
     n_head = 8
     n_layer = 8
     dropout = 0.2
-    batch_size = 64
+    batch_size = 4
     vocab_size = get_vocab_size(tokenizer)
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -163,10 +166,7 @@ def main() -> None:
         val_data=val_data,
         block_size=block_size,
         batch_size=batch_size,
-        device=device
     )
-    x,y = next(iter(train_loader))
-    x.shape, y.shape
 
     max_iters = 1
     eval_interval = 100
@@ -174,13 +174,6 @@ def main() -> None:
     learning_rate = 3e-4
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-    train_loader, val_loader = get_data_loaders(
-        train_data = train_data,
-        val_data = val_data,
-        block_size = block_size,
-        batch_size = batch_size,
-        device = device
-    )
 
     train_losses = []
     val_losses = []
@@ -198,8 +191,10 @@ def main() -> None:
                 val_losses.append(losses['val'])
                 print(f"iteration {i} / step {batch_idx}: " f"train loss {losses['train']:.4f}, " f"val loss {losses['val']:.4f}")
 
-            logits, loss = model(x,y)
+            x = x.to(device)
+            y = y.to(device)
             optimizer.zero_grad(set_to_none=True)
+            _, loss = model(x,y)
             loss.backward()
             optimizer.step()
         save_checkpoint(
