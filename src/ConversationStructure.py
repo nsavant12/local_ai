@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import pandas as pd
+import random
 
 def build_reply_examples(
     mssgs: list[dict],
@@ -73,3 +74,27 @@ def split_sessions(
         sessions.append(curr_session)
         
     return sessions
+
+#split sessions into either training or validation
+def split_train_val_sessions(
+    sessions: list[list[dict]],
+    val_fraction: float = 0.1,
+    seed: int = 42
+) -> tuple[list[list[dict]], list[list[dict]]]:
+
+    if not 0 < val_fraction < 1:
+        raise ValueError("val_fraction must be between 0 and 1")
+
+    if len(sessions) < 2:
+        raise ValueError("Need min of 2 sessions")
+
+    shuffled = list(sessions)
+    random.Random(seed).shuffle(shuffled)
+
+    val_count = max(1, int(len(shuffled) * val_fraction))
+    val_count = min(val_count, len(shuffled) - 1)
+
+    val_sessions = shuffled[:val_count]
+    train_sessions = shuffled[val_count:]
+
+    return train_sessions, val_sessions
