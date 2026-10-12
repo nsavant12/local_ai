@@ -52,19 +52,28 @@ def estimate_loss(
     val_loader: DataLoader,
     eval_iters: int
 ) -> Dict[str,float]:
+    if eval_iters <= 0:
+        raise ValueError("eval_iters needs to be a pos int.")
+    was_training = model.training
+
     model.eval()
     out = {}
-
-    for split, loader in [("train", train_loader), ('val', val_loader)]:
-        total_loss = torch.zeros(eval_iters)
-        for i, (x,y) in enumerate(loader):
-            if i >= eval_iters:
-                break
-            with torch.no_grad():
+    try:
+        for split, loader in [("train", train_loader), ('val', val_loader)]:
+            total_loss = 0.0
+            total_tokens = 0
+            for i, (x,y) in enumerate(loader):
+                if i >= eval_iters:
+                    break
                 _, loss = model(x,y)
-                total_loss[i] = loss.item()
-            out[split] = total_loss.mean().item()
-    model.train()
+                token_count = y.numel()
+                total_loss += loss.item() * token_count
+                total_tokens += token_count
+            if total_tokens == 0:
+                raise ValueError("No tokens, cannot compute average loss.")
+            out[split] = total_loss / total_tokens
+    finally:
+        model.train(was_training)
     return out
 
 def save_checkpoint(
@@ -152,7 +161,7 @@ def main() -> None:
                     model = model,
                     train_loader = train_loader,
                     val_loader = val_loader,
-                    eval_iters = min(eval_iters, len(val_loader))
+                    eval_iters = eval_iters
                 )
                 train_losses.append(losses['train'])
                 val_losses.append(losses['val'])
