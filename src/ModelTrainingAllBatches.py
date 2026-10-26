@@ -93,6 +93,23 @@ def estimate_loss(
         model.train(was_training)
     return out
 
+def save_tokenizer_snapshot(
+    tokenizer: BasicTokenizer,
+    run_dir: Path,
+) -> dict:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    prefix = run_dir / "tokenizer"
+    model_path = prefix.with_suffix(".model")
+
+    if model_path.exists():
+        raise FileExistsError("Run already has a tokenizer snapshot")
+    tokenizer.save(str(prefix))
+
+    return {
+        "file": model_path.name,
+        "sha256": hashlib.sha256(model_path.read_bytes()).hexdigest(),
+    }
+
 def save_checkpoint(
     model: GPT,
     optimizer: torch.optim.Optimizer,
@@ -100,6 +117,8 @@ def save_checkpoint(
     loss: float,
     file_path: str | Path = "checkpoint.pth",
     model_config: dict | None = None,
+    tokenizer_info: dict | None = None,
+    objective: str | None = None,
 ) -> None:
     checkpoint={
         "epoch": epoch,
@@ -107,6 +126,9 @@ def save_checkpoint(
         "optimizer_state_dict": optimizer.state_dict(),
         "loss": loss,
         "model_config": model_config,
+        "format_version": 1,
+        "tokenizer": tokenizer_info,
+        "objective": objective,
     }
     checkpoint_path = Path(file_path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -234,6 +256,8 @@ def main() -> None:
         PROJECT_ROOT / "output" / "runs" / args.objective / run_name
     )
 
+    tokenizer_info = save_tokenizer_snapshot(tokenizer, checkpoint_dir)
+
     for i in range(max_iters):
         for batch_idx, (x,y) in enumerate(train_loader):
             if batch_idx % eval_interval == 0 or batch_idx == len(train_loader) -1:
@@ -260,6 +284,8 @@ def main() -> None:
             loss=loss.item(),
             file_path=checkpoint_dir / f"checkpoint_{i}.pth",
             model_config=model_config,
+            tokenizer_info=tokenizer_info,
+            objective=args.objective,
         )
 
     plt.figure(figsize=(10,5))

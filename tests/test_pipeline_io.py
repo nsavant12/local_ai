@@ -18,11 +18,38 @@ from minbpe import BasicTokenizer
 from src.ConversationDataset import get_conversation_loaders
 from src.ConversationEncoding import encode_prompt
 from src.DataCleaning import prep_examples, write_jsonl
-from src.ModelTrainingAllBatches import estimate_loss, get_vocab_size, save_checkpoint
+from src.ModelTrainingAllBatches import (
+    estimate_loss, get_vocab_size, save_checkpoint, save_tokenizer_snapshot,
+)
 from src.TransformerModel import GPT
 
 
 class PipelineIOTests(unittest.TestCase):
+    def test_tokenizer_snapshot_preserves_encoding_and_refuses_overwrite(self):
+        tokenizer = BasicTokenizer()
+        text = "Ava asks about lunch. Me replies yes. " * 8
+        tokenizer.train(text, vocab_size=264, verbose=False)
+        next_id = max(tokenizer.vocab) + 1
+        tokenizer.register_special_tokens({
+            "<|start_turn|>": next_id,
+            "<|separator|>": next_id + 1,
+            "<|end_turn|>": next_id + 2,
+            "<|padding|>": next_id + 3,
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory) / "run"
+            info = save_tokenizer_snapshot(tokenizer, run_dir)
+            path = run_dir / info["file"]
+            original_bytes = path.read_bytes()
+            loaded = BasicTokenizer()
+            loaded.load(str(path))
+            self.assertEqual(loaded.encode(text), tokenizer.encode(text))
+            self.assertEqual(loaded.vocab, tokenizer.vocab)
+            replacement = BasicTokenizer()
+            with self.assertRaises(FileExistsError):
+                save_tokenizer_snapshot(replacement, run_dir)
+            self.assertEqual(path.read_bytes(), original_bytes)
+
     def test_synthetic_sessions_train_evaluate_reload_and_generate(self):
         torch.manual_seed(42)
         records = []
