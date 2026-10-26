@@ -98,13 +98,15 @@ def save_checkpoint(
     optimizer: torch.optim.Optimizer,
     epoch: int,
     loss: float,
-    file_path: str | Path = "checkpoint.pth"
+    file_path: str | Path = "checkpoint.pth",
+    model_config: dict | None = None,
 ) -> None:
     checkpoint={
         "epoch": epoch,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
-        "loss": loss
+        "loss": loss,
+        "model_config": model_config,
     }
     checkpoint_path = Path(file_path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -168,14 +170,15 @@ def main() -> None:
     device = select_device()
     print(f"Training device: {device}")
 
-    model = GPT(
-        vocab_size=vocab_size,
-        block_size=block_size,
-        n_embd=n_embd,
-        n_head=n_head,
-        n_layer=n_layer,
-        dropout=dropout,
-    ).to(device)
+    model_config = {
+        "vocab_size": vocab_size,
+        "block_size": block_size,
+        "n_embd": n_embd,
+        "n_head": n_head,
+        "n_layer": n_layer,
+        "dropout": dropout,
+    }
+    model = GPT(**model_config).to(device)
 
     # model = torch.compile(model)
 
@@ -255,7 +258,8 @@ def main() -> None:
             optimizer=optimizer,
             epoch=i,
             loss=loss.item(),
-            file_path=checkpoint_dir / f"checkpoint_{i}.pth"
+            file_path=checkpoint_dir / f"checkpoint_{i}.pth",
+            model_config=model_config,
         )
 
     plt.figure(figsize=(10,5))

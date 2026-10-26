@@ -118,9 +118,12 @@ class PipelineIOTests(unittest.TestCase):
             self.assertLess(final["train"], initial["train"])
             self.assertTrue(all(torch.isfinite(torch.tensor(v)).item() for v in final.values()))
             checkpoint_path = root / "run/checkpoint.pth"
-            save_checkpoint(model, optimizer, 7, final["train"], checkpoint_path)
+            save_checkpoint(
+                model, optimizer, 7, final["train"], checkpoint_path,
+                model_config=config,
+            )
             checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-            restored = GPT(**config)
+            restored = GPT(**checkpoint["model_config"])
             restored.load_state_dict(checkpoint["model_state_dict"])
             prompt = torch.tensor([encode_prompt(val[0]["context"], tokenizer)])
             settings = dict(max_new_tokens=8, temp=0.7, top_k=1,
@@ -173,12 +176,14 @@ class PipelineIOTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "new" / "nested" / "checkpoint.pth"
             self.assertFalse(path.parent.exists())
-            save_checkpoint(model, optimizer, 2, loss.item(), path)
+            save_checkpoint(
+                model, optimizer, 2, loss.item(), path, model_config=config,
+            )
             checkpoint = torch.load(path, map_location="cpu", weights_only=True)
 
         self.assertEqual(checkpoint["epoch"], 2)
         self.assertEqual(checkpoint["loss"], loss.item())
-        restored = GPT(**config)
+        restored = GPT(**checkpoint["model_config"])
         restored.load_state_dict(checkpoint["model_state_dict"])
         restored_optimizer = torch.optim.AdamW(restored.parameters(), lr=0.5)
         restored_optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
