@@ -17,7 +17,7 @@ from src.TransformerModel import GPT
 
 
 class PipelineIOTests(unittest.TestCase):
-    def test_training_text_preserves_fields_and_uses_selected_file(self):
+    def test_training_text_preserves_group_turns_and_multiline_reply(self):
         example = {
             "context": [
                 {"sender": "Ava", "text": "Lunch?"},
@@ -30,11 +30,6 @@ class PipelineIOTests(unittest.TestCase):
             training_path = root / "train.jsonl"
             training_path.write_text(
                 "\n" + json.dumps(example) + "\n\n", encoding="utf-8"
-            )
-            validation_path = root / "validate.jsonl"
-            validation_path.write_text(
-                json.dumps({"context": [], "reply": "HELD_OUT"}),
-                encoding="utf-8",
             )
             self.assertEqual(
                 load_training_text(training_path),

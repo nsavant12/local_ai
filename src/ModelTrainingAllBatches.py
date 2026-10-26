@@ -12,6 +12,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from minbpe import BasicTokenizer
 from src.TransformerModel import GPT
 from src.ConversationDataset import get_conversation_loaders
+from src.ConversationEncoding import encode_prompt
 
 
 def select_device() -> torch.device:
@@ -267,13 +268,28 @@ def main() -> None:
     plt.grid()
     plt.show()
 
-    input_tokens = tokenizer.encode("The quick brown fox jumps over the lazy dog.")
-    input_tokens = torch.tensor(input_tokens, dtype=torch.long).unsqueeze(0).to(device)
-    model.eval()
-    with torch.no_grad():
-        out = model.generate(input_tokens = input_tokens, max_new_tokens=50, temperature=0.7, top_k=50)
-
-    print(tokenizer.decode(out[0].tolist()))
+    if args.objective == "reply":
+        context = [
+            {"sender": "Friend", "text": "Want to grab lunch?"}
+        ]
+        prompt_ids = encode_prompt(context, tokenizer)
+        stop_id = tokenizer.special_tokens["<|end_turn|>"]
+    else:
+        prompt_ids = tokenizer.encode("The quick brown fox jumps over the lazy dog.")
+        stop_id = None
+    input_tokens = torch.tensor([prompt_ids], dtype=torch.long, device=device)
+    out = model.generate(
+        input_tokens=input_tokens,
+        max_new_tokens=50,
+        temp=0.7,
+        top_k=50,
+        stop_token_id=stop_id,
+    )
+    reply_ids = out[0, len(prompt_ids):].tolist()
+    if stop_id is not None and reply_ids and reply_ids[-1] == stop_id:
+        reply_ids = reply_ids[:-1]
+    
+    print(tokenizer.decode(reply_ids))
 
 
 if __name__ == "__main__":

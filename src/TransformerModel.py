@@ -172,14 +172,42 @@ class GPT(nn.Module):
         return logits, loss
 
     # Generate new tokens based on the current input sequence.
-    def generate(self, input_tokens: torch.Tensor, max_new_tokens: int) -> torch.Tensor:
-        for _ in range(max_new_tokens):
-            cropped_input = input_tokens[:, -self.block_size:]
-            logits, _ = self.forward(cropped_input)
-            logits = logits[:, -1, :]
-            probs = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
-            input_tokens = torch.cat([input_tokens, next_token], dim=1)
+    @torch.no_grad()
+    def generate(self, input_tokens: torch.Tensor, max_new_tokens: int, temp: float=1.0, top_k: Optional[int] = None, stop_token_id: Optional[int] = None) -> torch.Tensor:
+
+        if input_tokens.ndim != 2 or input_tokens.numel() == 0:
+            raise ValueError("Expected nonempty batch, seq tensor")
+        if max_new_tokens < 0:
+            raise ValueError("max new tokens must be non negative")
+        if temp <= 0:
+            raise ValueError("temp must be pos")
+        if top_k is not None and top_k <= 0:
+            raise ValueError("top_k must be pos")
+        if stop_token_id is not None and input_tokens.shape[0] != 1:
+            raise ValueError("Stopping currently supports one conversation")
+
+        was_training = self.training
+        self.eval()
+        try:
+            for _ in range(max_new_tokens):
+                cropped_input = input_tokens[:, -self.block_size:]
+                logits, _ = self(cropped_input)
+                logits = logits[:, -1, :] / temp
+
+                if top_k is not None:
+                    k = min(top_k, logits.shape[-1])
+                    vals, _ = torch.topk(logits, k, dim=-1)
+                    logits = logits.masked_fill(
+                        logits < vals[:, -1:],
+                        float("-inf"),
+                    )
+                probs = F.softmax(logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+                input_tokens = torch.cat([input_tokens, next_token], dim=1)
+                if (stop_token_id is not None and next_token.item() == stop_token_id):
+                    break
+        finally:
+            self.train(was_training)
         return input_tokens
 
 def print_model_summary(model: torch.nn.Module, indent: str = '') -> None:
