@@ -72,3 +72,17 @@ class BasicTokenizer(Tokenizer):
             idx = self.merges[pair]
             ids = merge(ids, pair, idx)
         return ids
+    
+    def register_special_tokens(self, special_tokens):
+        reg_ids = set(range(256)) | set(self.merges.values())
+        special_ids = list(special_tokens.values())
+
+        if any(type(idx) is not int or idx < 0 for idx in special_ids):
+            raise ValueError("Special tokens must be non neg")
+        if len(special_ids) != len(set(special_ids)):
+            raise ValueError("Special tokens must have unique ids")
+        if reg_ids.intersection(special_ids):
+            raise ValueError("Special token Ids overlap ordinary token ids")
+
+        self.special_tokens = dict(special_tokens)
+        self.vocab = self._build_vocab()

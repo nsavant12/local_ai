@@ -11,9 +11,7 @@ from minbpe import BasicTokenizer
 from src.TransformerModel import GPT
 
 def get_vocab_size(tokenizer: BasicTokenizer) -> int:
-    vocab = tokenizer.vocab
-    special_tokens = tokenizer.special_tokens
-    return len(vocab) + len(special_tokens)
+    return max(tokenizer.vocab) + 1
 
 
 class TextDataset(Dataset):
