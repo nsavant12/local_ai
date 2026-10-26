@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 import sys
 from typing import Tuple, Dict
 import matplotlib.pyplot as plt
@@ -96,7 +97,7 @@ def save_checkpoint(
     optimizer: torch.optim.Optimizer,
     epoch: int,
     loss: float,
-    file_path: str = "checkpoint.pth"
+    file_path: str | Path = "checkpoint.pth"
 ) -> None:
     checkpoint={
         "epoch": epoch,
@@ -104,7 +105,9 @@ def save_checkpoint(
         "optimizer_state_dict": optimizer.state_dict(),
         "loss": loss
     }
-    torch.save(checkpoint, file_path)
+    checkpoint_path = Path(file_path)
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(checkpoint, checkpoint_path)
 
 #Cache existing token IDs
 def load_or_encode(
@@ -145,7 +148,12 @@ def main() -> None:
     torch.manual_seed(42)
 
     tokenizer = BasicTokenizer()
-    tokenizer_path = PROJECT_ROOT / "output" / "tokenizer" / "my_tokenizer.model"
+    tokenizer_filename = (
+        "conversation_tokenizer.model"
+        if args.objective == "reply"
+        else "my_tokenizer.model"
+    )
+    tokenizer_path = PROJECT_ROOT / "output" / "tokenizer" / tokenizer_filename
     tokenizer.load(model_file=str(tokenizer_path))
 
 
@@ -217,6 +225,11 @@ def main() -> None:
     train_losses = []
     val_losses = []
 
+    run_name = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    checkpoint_dir = (
+        PROJECT_ROOT / "output" / "runs" / args.objective / run_name
+    )
+
     for i in range(max_iters):
         for batch_idx, (x,y) in enumerate(train_loader):
             if batch_idx % eval_interval == 0 or batch_idx == len(train_loader) -1:
@@ -241,7 +254,7 @@ def main() -> None:
             optimizer=optimizer,
             epoch=i,
             loss=loss.item(),
-            file_path=f"../output/pre_training/run_4/checkpoint_{i}.pth"
+            file_path=checkpoint_dir / f"checkpoint_{i}.pth"
         )
 
     plt.figure(figsize=(10,5))
