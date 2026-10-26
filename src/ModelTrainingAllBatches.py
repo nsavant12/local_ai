@@ -3,12 +3,24 @@ import sys
 from typing import Tuple, Dict
 import matplotlib.pyplot as plt
 import hashlib
+import argparse
 import torch
 from torch.utils.data import DataLoader, Dataset
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 from minbpe import BasicTokenizer
 from src.TransformerModel import GPT
+from src.ConversationDataset import get_conversation_loaders
+
+
+def select_device() -> torch.device:
+    """Prefer my desktop's CUDA GPU, then the Mac's MPS GPU, then CPU."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
 
 def get_vocab_size(tokenizer: BasicTokenizer) -> int:
     return max(tokenizer.vocab) + 1
@@ -123,22 +135,19 @@ def load_or_encode(
     return data
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--objective",
+        choices=["flat-text", "reply"],
+        default="flat-text"
+    )
+    args = parser.parse_args()
     torch.manual_seed(42)
 
     tokenizer = BasicTokenizer()
     tokenizer_path = PROJECT_ROOT / "output" / "tokenizer" / "my_tokenizer.model"
     tokenizer.load(model_file=str(tokenizer_path))
 
-    with open(PROJECT_ROOT / "output" / "combined_text.txt", "r", encoding="utf-8") as f:
-        text_seq = f.read()
-    data = load_or_encode(
-        txt=text_seq, 
-        tokenizer=tokenizer, 
-        tokenizer_path=tokenizer_path, 
-        cache_dir = PROJECT_ROOT / "output" / "token_cache")
-    split_idx = int(0.9 * len(data))
-    train_data = data[:split_idx]
-    val_data = data[split_idx:]
 
     block_size = 256
     n_embd = 512
@@ -147,7 +156,8 @@ def main() -> None:
     dropout = 0.2
     batch_size = 4
     vocab_size = get_vocab_size(tokenizer)
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = select_device()
+    print(f"Training device: {device}")
 
     model = GPT(
         vocab_size=vocab_size,
@@ -160,12 +170,42 @@ def main() -> None:
 
     # model = torch.compile(model)
 
-    train_loader, val_loader = get_data_loaders(
-        train_data=train_data,
-        val_data=val_data,
-        block_size=block_size,
-        batch_size=batch_size,
-    )
+    if args.objective == "reply":
+        required_markers = {
+            "<|start_turn|>",
+            "<|separator|>",
+            "<|end_turn|>",
+            "<|padding|>"
+        }
+        if not required_markers.issubset(tokenizer.special_tokens):
+            raise ValueError("Saved tokenizer is missing conversation markers")
+
+        convo_dir = PROJECT_ROOT / "output" / "conversations"
+        train_loader, val_loader = get_conversation_loaders(
+            train_path=convo_dir / "train.jsonl",
+            val_path=convo_dir / "validate.jsonl",
+            tokenizer=tokenizer,
+            block_size=block_size,
+            batch_size=batch_size,
+        )
+    else:
+        corpus_path = PROJECT_ROOT / "output" / "combined_text.txt"
+        txt_seq = corpus_path.read_text(encoding="utf-8")
+
+        data = load_or_encode(
+            txt=txt_seq,
+            tokenizer=tokenizer,
+            tokenizer_path=tokenizer_path,
+            cache_dir=PROJECT_ROOT / "output" / "token_cache"
+        )
+        split_idx = int(0.9 * len(data))
+
+        train_loader, val_loader = get_data_loaders(
+            train_data=data[:split_idx],
+            val_data=data[split_idx:],
+            block_size=block_size,
+            batch_size=batch_size,
+        )
 
     max_iters = 1
     eval_interval = 100

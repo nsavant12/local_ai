@@ -1,24 +1,37 @@
 """Synthetic training checks; no datasets, tokenizers, or caches are loaded.
 
 Run from the project root:
-    .venv/bin/python -m unittest discover -s tests -v
+    .venv/bin/python -B -m unittest discover -s tests -p device_training.py -v
 """
 
 import math
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.ModelTrainingAllBatches import estimate_loss, get_data_loaders
+from src.ModelTrainingAllBatches import estimate_loss, get_data_loaders, select_device
 from src.TransformerModel import GPT
 
 
 class DeviceTrainingTests(unittest.TestCase):
+    def test_device_selection_prefers_cuda_then_mps_then_cpu(self) -> None:
+        for cuda_available, mps_available, expected in (
+            (True, True, "cuda"),
+            (True, False, "cuda"),
+            (False, True, "mps"),
+            (False, False, "cpu"),
+        ):
+            with self.subTest(cuda=cuda_available, mps=mps_available):
+                with patch("torch.cuda.is_available", return_value=cuda_available), \
+                     patch("torch.backends.mps.is_available", return_value=mps_available):
+                    self.assertEqual(select_device(), torch.device(expected))
+
     def _check_training_and_evaluation(self, device: torch.device) -> None:
         torch.manual_seed(42)
         train_ids = torch.randint(0, 32, (40,), device="cpu")
@@ -75,6 +88,10 @@ class DeviceTrainingTests(unittest.TestCase):
     @unittest.skipUnless(torch.cuda.is_available(), "CUDA is unavailable in this environment")
     def test_cuda_training_and_evaluation(self) -> None:
         self._check_training_and_evaluation(torch.device("cuda"))
+
+    @unittest.skipUnless(torch.backends.mps.is_available(), "MPS is unavailable in this environment")
+    def test_mps_training_and_evaluation(self) -> None:
+        self._check_training_and_evaluation(torch.device("mps"))
 
 
 if __name__ == "__main__":
