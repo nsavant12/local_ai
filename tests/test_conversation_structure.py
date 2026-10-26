@@ -1,6 +1,7 @@
 """Conversation example construction using invented messages only."""
 
 from copy import deepcopy
+from datetime import datetime, timedelta
 from pathlib import Path
 import sys
 import unittest
@@ -8,10 +9,21 @@ import unittest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.ConversationStructure import build_reply_examples
+from src.ConversationStructure import build_reply_examples, split_sessions
 
 
 class ConversationStructureTests(unittest.TestCase):
+    def test_session_boundary_keeps_exact_hour_but_splits_larger_gap(self):
+        start = datetime(2026, 1, 1, 12)
+        messages = [
+            {"timestamp": start, "sender": "Ava", "message": "Lunch?"},
+            {"timestamp": start + timedelta(hours=1), "sender": "Me", "message": "Yes"},
+            {"timestamp": start + timedelta(hours=2, seconds=1), "sender": "Bo", "message": "Tea?"},
+        ]
+        self.assertEqual(split_sessions(messages), [messages[:2], messages[2:]])
+        with self.assertRaises(ValueError):
+            split_sessions(list(reversed(messages)))
+
     def setUp(self) -> None:
         self.messages = [
             {"sender": "Friend", "message": "wanna grab food?"},
