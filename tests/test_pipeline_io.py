@@ -18,6 +18,7 @@ from minbpe import BasicTokenizer
 from src.ConversationDataset import get_conversation_loaders
 from src.ConversationEncoding import encode_prompt
 from src.DataCleaning import prep_examples, write_jsonl
+from src.Inference import load_for_inference
 from src.ModelTrainingAllBatches import (
     estimate_loss, get_vocab_size, save_checkpoint, save_tokenizer_snapshot,
 )
@@ -25,6 +26,36 @@ from src.TransformerModel import GPT
 
 
 class PipelineIOTests(unittest.TestCase):
+    def test_inference_rejects_changed_token_meanings_at_same_vocab_size(self):
+        tokenizer = BasicTokenizer()
+        tokenizer.register_special_tokens({
+            "<|start_turn|>": 256, "<|separator|>": 257,
+            "<|end_turn|>": 258, "<|padding|>": 259,
+        })
+        config = dict(
+            vocab_size=get_vocab_size(tokenizer), block_size=8,
+            n_embd=8, n_head=2, n_layer=1, dropout=0.0,
+        )
+        model = GPT(**config)
+        optimizer = torch.optim.AdamW(model.parameters())
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory)
+            info = save_tokenizer_snapshot(tokenizer, run_dir)
+            checkpoint_path = run_dir / "checkpoint.pth"
+            save_checkpoint(
+                model, optimizer, 0, 0.0, checkpoint_path,
+                model_config=config, tokenizer_info=info, objective="reply",
+            )
+            replacement = BasicTokenizer()
+            replacement.register_special_tokens({
+                "<|start_turn|>": 258, "<|separator|>": 257,
+                "<|end_turn|>": 256, "<|padding|>": 259,
+            })
+            self.assertEqual(get_vocab_size(replacement), config["vocab_size"])
+            replacement.save(str(run_dir / "tokenizer"))
+            with self.assertRaises(ValueError):
+                load_for_inference(checkpoint_path, device=torch.device("cpu"))
+
     def test_tokenizer_snapshot_preserves_encoding_and_refuses_overwrite(self):
         tokenizer = BasicTokenizer()
         text = "Ava asks about lunch. Me replies yes. " * 8
@@ -145,20 +176,23 @@ class PipelineIOTests(unittest.TestCase):
             self.assertLess(final["train"], initial["train"])
             self.assertTrue(all(torch.isfinite(torch.tensor(v)).item() for v in final.values()))
             checkpoint_path = root / "run/checkpoint.pth"
+            info = save_tokenizer_snapshot(tokenizer, checkpoint_path.parent)
             save_checkpoint(
                 model, optimizer, 7, final["train"], checkpoint_path,
-                model_config=config,
+                model_config=config, tokenizer_info=info, objective="reply",
             )
-            checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-            restored = GPT(**checkpoint["model_config"])
-            restored.load_state_dict(checkpoint["model_state_dict"])
-            prompt = torch.tensor([encode_prompt(val[0]["context"], tokenizer)])
+            restored, restored_tokenizer, objective = load_for_inference(
+                checkpoint_path, device=torch.device("cpu"),
+            )
+            self.assertEqual(objective, "reply")
+            self.assertFalse(restored.training)
+            prompt = torch.tensor([encode_prompt(val[0]["context"], restored_tokenizer)])
             settings = dict(max_new_tokens=8, temp=0.7, top_k=1,
                             stop_token_id=tokenizer.special_tokens["<|end_turn|>"])
             expected = model.generate(prompt, **settings)
             actual = restored.generate(prompt, **settings)
             torch.testing.assert_close(actual, expected)
-            tokenizer.decode(actual[0, prompt.shape[1]:].tolist())
+            restored_tokenizer.decode(actual[0, prompt.shape[1]:].tolist())
 
     def test_training_text_preserves_group_turns_and_multiline_reply(self):
         example = {
