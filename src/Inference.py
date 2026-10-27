@@ -135,7 +135,7 @@ def main() -> None:
         command = mssg.strip()
         if command == "/quit":
             break
-        if command == "/reset"
+        if command == "/reset":
             history.clear()
             print("Convo cleared")
             continue
