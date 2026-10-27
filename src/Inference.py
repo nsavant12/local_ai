@@ -1,6 +1,6 @@
 import hashlib
 from pathlib import Path
-
+import argparse
 import torch
 from minbpe import BasicTokenizer
 from src.ModelTrainingAllBatches import get_vocab_size, select_device
@@ -100,3 +100,67 @@ def generate_reply(
         reply_ids = reply_ids[:-1]
 
     return tokenizer.decode(reply_ids)
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("checkpoint", type=Path)
+    parser.add_argument("--speaker", default="Friend")
+    parser.add_argument("--max-new-tokens", type=int, default=64)
+    parser.add_argument("--temp", type=float, default=0.7)
+    parser.add_argument("--top-k", type=int, default=50)
+    args = parser.parse_args()
+
+    speaker = args.speaker.strip()
+    if not speaker or speaker == "Me":
+        parser.error("--speaker must name another person")
+    if args.max_new_tokens <= 0 or args.temp <= 0 or args.top_k <= 0:
+        parser.error("Generation settings have to be pos")
+    
+    model, tokenizer, objective = load_for_inference(args.checkpoint)
+    if objective != "reply":
+        parser.error("Chat requires reply-training checkpoint")
+
+    print(f"Device: {next(model.parameters()).device}")
+    print("Type /reset for a new conversation or /quit to quit")
+
+    history = []
+
+    while True:
+        try: 
+            mssg = input(f"{speaker}: ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        
+        command = mssg.strip()
+        if command == "/quit":
+            break
+        if command == "/reset"
+            history.clear()
+            print("Convo cleared")
+            continue
+        if not command:
+            continue
+        
+        ctx = history + [{"sender": speaker, "text": mssg}]
+
+        try:
+            reply = generate_reply(
+                model,
+                tokenizer,
+                ctx,
+                max_new_tokens=args.max_new_tokens,
+                temp=args.temp,
+                top_k=args.top_k
+            )
+        except ValueError as error:
+            print(f"Couldnt generate: {error}")
+            continue
+        print(f"Me: {reply}")
+        history = (
+            ctx + [{"sender": "Me", "text": reply}]
+        )[-6:]
+
+if __name__ == "__main__":
+    main()
+        

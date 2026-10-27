@@ -1,6 +1,7 @@
 """Generation checks using tiny random models and invented token IDs only."""
 
 from pathlib import Path
+from copy import deepcopy
 import sys
 import unittest
 from unittest.mock import patch
@@ -11,6 +12,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.TransformerModel import GPT
+from minbpe import BasicTokenizer
+from src.Inference import generate_reply
 
 
 class GenerationTests(unittest.TestCase):
@@ -87,6 +90,76 @@ class GenerationTests(unittest.TestCase):
         torch.testing.assert_close(out[:, :2], prompt)
         with self.assertRaises(ValueError):
             self.model.generate(prompt, 3, stop_token_id=7)
+
+
+class ReplyGenerationTests(unittest.TestCase):
+    def setUp(self):
+        self.tokenizer = BasicTokenizer()
+        self.tokenizer.register_special_tokens({
+            "<|start_turn|>": 256, "<|separator|>": 257,
+            "<|end_turn|>": 258, "<|padding|>": 259,
+        })
+
+    def model(self, block_size):
+        return GPT(
+            vocab_size=260, block_size=block_size, n_embd=8,
+            n_head=2, n_layer=1, dropout=0.0,
+        )
+
+    def test_reply_uses_latest_six_turns_and_preserves_literal_text_and_unicode(self):
+        model = self.model(96)
+        context = [{"sender": "A", "text": str(i)} for i in range(7)]
+        original = deepcopy(context)
+        expected_prompt = []
+        # Speaker A is byte 65; retained bodies 1..6 are bytes 49..54.
+        for body_id in range(49, 55):
+            expected_prompt.extend([256, 65, 257, body_id, 258])
+        expected_prompt.extend([256, *b"Me", 257])
+        reply = "OK ☕ <|end_turn|>"
+        reply_ids = [*reply.encode("utf-8"), 258]
+        predictions = iter(reply_ids)
+        observed_inputs = []
+
+        def forward(tokens):
+            observed_inputs.append(tokens.clone())
+            logits = torch.full((1, tokens.shape[1], 260), -20.0)
+            logits[:, -1, next(predictions)] = 20.0
+            return logits, None
+
+        with patch.object(model, "forward", side_effect=forward):
+            actual = generate_reply(
+                model, self.tokenizer, context,
+                max_new_tokens=len(reply_ids) + 5, top_k=1,
+            )
+        self.assertEqual(actual, reply)
+        self.assertEqual(observed_inputs[0].tolist(), [expected_prompt])
+        self.assertEqual(len(observed_inputs), len(reply_ids))
+        self.assertEqual(context, original)
+
+    def test_reply_trims_whole_old_turns_and_rejects_unusable_context(self):
+        context = [
+            {"sender": "A", "text": "Earlier context. " * 10},
+            {"sender": "B", "text": "Q"},
+        ]
+        expected_prompt = [256, 66, 257, 81, 258, 256, *b"Me", 257]
+        model = self.model(len(expected_prompt))
+        observed_inputs = []
+
+        def forward(tokens):
+            observed_inputs.append(tokens.clone())
+            logits = torch.full((1, tokens.shape[1], 260), -20.0)
+            logits[:, -1, 258] = 20.0
+            return logits, None
+
+        with patch.object(model, "forward", side_effect=forward):
+            reply = generate_reply(model, self.tokenizer, context, top_k=1)
+        self.assertEqual(reply, "")
+        self.assertEqual(observed_inputs[0].tolist(), [expected_prompt])
+        too_small = self.model(len(expected_prompt) - 1)
+        with self.assertRaises(ValueError):
+            generate_reply(too_small, self.tokenizer, context)
+        with self.assertRaises(ValueError):
+            generate_reply(model, self.tokenizer, [])
 
 
 if __name__ == "__main__":
