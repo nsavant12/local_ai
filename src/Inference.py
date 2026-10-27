@@ -74,7 +74,7 @@ def generate_reply(
     if not ctx: 
         raise ValueError("Need at least one context turn is required")
     
-    prompt_ids = encode(ctx, tokenizer, self_sender)
+    prompt_ids = encode_prompt(ctx, tokenizer, self_sender)
 
     while len(prompt_ids) > model.block_size and len(ctx) > 1:
         ctx = ctx[1:]
@@ -85,7 +85,7 @@ def generate_reply(
     
     device = next(model.parameters()).device
     input_tokens = torch.tensor([prompt_ids], dtype=torch.long, device=device)
-    stop_id = tokenizer.special_tokens("<|end_turn|>")
+    stop_id = tokenizer.special_tokens["<|end_turn|>"]
 
     out = model.generate(
         input_tokens=input_tokens,
