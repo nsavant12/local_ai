@@ -2,6 +2,8 @@
 
 from pathlib import Path
 from copy import deepcopy
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import sys
 import unittest
 from unittest.mock import patch
@@ -13,7 +15,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.TransformerModel import GPT
 from minbpe import BasicTokenizer
-from src.Inference import generate_reply
+from src.Inference import generate_reply, main as chat_main
 
 
 class GenerationTests(unittest.TestCase):
@@ -160,6 +162,52 @@ class ReplyGenerationTests(unittest.TestCase):
             generate_reply(too_small, self.tokenizer, context)
         with self.assertRaises(ValueError):
             generate_reply(model, self.tokenizer, [])
+
+
+class ChatCommandTests(unittest.TestCase):
+    def test_chat_history_is_bounded_and_reset_starts_fresh(self):
+        model = torch.nn.Linear(1, 1)
+        observed_contexts = []
+
+        def reply(model, tokenizer, context, **settings):
+            observed_contexts.append(deepcopy(context))
+            return f"reply{len(observed_contexts)}"
+
+        messages = [
+            "", "First", "Second", "Third", "Fourth", "Fifth",
+            "/reset", "New conversation", "/quit",
+        ]
+        with patch("sys.argv", ["Inference", "synthetic.pth", "--speaker", "Ava"]), \
+             patch("src.Inference.load_for_inference", return_value=(model, BasicTokenizer(), "reply")), \
+             patch("src.Inference.generate_reply", side_effect=reply), \
+             patch("builtins.input", side_effect=messages), \
+             redirect_stdout(io.StringIO()):
+            chat_main()
+
+        self.assertEqual(len(observed_contexts), 6)
+        self.assertEqual(observed_contexts[1], [
+            {"sender": "Ava", "text": "First"},
+            {"sender": "Me", "text": "reply1"},
+            {"sender": "Ava", "text": "Second"},
+        ])
+        # Six retained history turns plus the incoming message.
+        self.assertLessEqual(max(map(len, observed_contexts)), 7)
+        self.assertEqual(observed_contexts[4][0]["text"], "Second")
+        self.assertEqual(observed_contexts[-1], [
+            {"sender": "Ava", "text": "New conversation"},
+        ])
+
+    def test_chat_rejects_flat_text_checkpoint_before_reading_messages(self):
+        with patch("sys.argv", ["Inference", "synthetic.pth"]), \
+             patch("src.Inference.load_for_inference", return_value=(None, None, "flat-text")), \
+             patch("builtins.input") as read_message, \
+             patch("src.Inference.generate_reply") as reply, \
+             redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as exited:
+                chat_main()
+        self.assertEqual(exited.exception.code, 2)
+        read_message.assert_not_called()
+        reply.assert_not_called()
 
 
 if __name__ == "__main__":
